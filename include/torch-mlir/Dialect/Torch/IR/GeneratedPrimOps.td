@@ -158,6 +158,7 @@ def Torch_PrimMaxIntOp : Torch_Op<"prim.max.int", [
     Torch_IntType:$result
   );
   let assemblyFormat = "$a `,` $b attr-dict `:` type($a) `,` type($b) `->` type($result)";
+  let hasFolder = 1;
 }
 
 def Torch_PrimRaiseExceptionOp : Torch_Op<"prim.RaiseException", [

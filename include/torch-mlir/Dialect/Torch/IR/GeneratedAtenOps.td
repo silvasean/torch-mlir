@@ -2380,6 +2380,7 @@ def Torch_AtenFloatScalarOp : Torch_Op<"aten.Float.Scalar", [
     Torch_FloatType:$result
   );
   let assemblyFormat = "$a attr-dict `:` type($a) `->` type($result)";
+  let hasFolder = 1;
 }
 
 def Torch_AtenFloatStrOp : Torch_Op<"aten.Float.str", [

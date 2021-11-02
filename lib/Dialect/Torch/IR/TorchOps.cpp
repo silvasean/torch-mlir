@@ -273,6 +273,11 @@ void PrimLoopOp::getSuccessorRegions(
   regions.emplace_back(getResults());
 }
 
+bool PrimLoopOp::isForLike() {
+  bool b;
+  return matchPattern(initialCondition(), m_TorchConstantBool(&b)) && b;
+}
+
 //===----------------------------------------------------------------------===//
 // PrimLoopConditionOp
 //===----------------------------------------------------------------------===//
@@ -624,6 +629,23 @@ OpFoldResult AtenGeIntOp::fold(ArrayRef<Attribute> operands) {
 }
 
 //===----------------------------------------------------------------------===//
+// AtenFloatScalarOp
+//===----------------------------------------------------------------------===//
+
+OpFoldResult AtenFloatScalarOp::fold(ArrayRef<Attribute> operands) {
+  // Constant fold int -> float conversion.
+  if (auto integerAttr = operands[0].dyn_cast_or_null<IntegerAttr>()) {
+    return FloatAttr::get(
+        mlir::Float64Type::get(getContext()),
+        static_cast<double>(integerAttr.getValue().getSExtValue()));
+  }
+  // If the input is float type already, the op is an identity.
+  if (getType() == getOperand().getType())
+    return getOperand();
+  return nullptr;
+}
+
+//===----------------------------------------------------------------------===//
 // NonValueTensorLiteralOp
 //===----------------------------------------------------------------------===//
 
@@ -914,6 +936,22 @@ void Aten__Getitem__TOp::getCanonicalizationPatterns(
     rewriter.replaceOp(op, {listConstruct.getOperand(index)});
     return success();
   });
+    patterns.add(+[](Aten__Getitem__TOp op, PatternRewriter &rewriter) {
+    auto sizeOp = op.list().getDefiningOp<AtenSizeOp>();
+    if (!sizeOp)
+      return failure();
+    // This assumes tht the size doesn't change between the
+    // AtenSizeOp and the Aten__Getitem__TOp.
+    // `t_` is the only op I can find that changes the shape in-place. It seems
+    // like otherwise we can treat the size of a tensor as having value
+    // semantics. The other view-like ops don't have in-place variants --
+    // they always return a new SSA value that is aliased to the input.
+    // Can we have a pass to normalize the `t_` case and then elsewhere in the
+    // compiler treat the size as having value semantics?
+    // TODO: Investigate the `t_` case. Why is it such an outlier?
+    rewriter.replaceOpWithNewOp<AtenSizeIntOp>(op, sizeOp.self(), op.idx());
+    return success();
+  });
 }
 
 //===----------------------------------------------------------------------===//
@@ -1055,5 +1093,69 @@ OpFoldResult PrimDtypeOp::fold(ArrayRef<Attribute> operands) {
   }
   return nullptr;
 }
+
+//===----------------------------------------------------------------------===//
+// PrimMaxIntOp
+//===----------------------------------------------------------------------===//
+
+OpFoldResult PrimMaxIntOp::fold(ArrayRef<Attribute> operands) {
+  // If both operands are the same, then the operation is an identity.
+  if (a() == b())
+    return a();
+
+  auto lhs = operands[0].dyn_cast_or_null<IntegerAttr>();
+  auto rhs = operands[1].dyn_cast_or_null<IntegerAttr>();
+  if (!lhs || !rhs)
+    return nullptr;
+  // Torch semantics are that !torch.int is 64-bit signed.
+  return IntegerAttr::get(
+      lhs.getType(),
+      std::max(lhs.getValue().getSExtValue(), rhs.getValue().getSExtValue()));
+}
+
+//===----------------------------------------------------------------------===//
+// ShapeCalculateOp
+//===----------------------------------------------------------------------===//
+
+void ShapeCalculateOp::getSuccessorRegions(
+    Optional<unsigned> index, ArrayRef<Attribute> operands,
+    SmallVectorImpl<RegionSuccessor> &regions) {
+  (void)operands;
+
+  if (!index.hasValue()) {
+    // First thing the op does is branch into the shape calculation.
+    regions.emplace_back(&shapeCalculation());
+    return;
+  }
+  if (*index == 0) {
+    // Body returns control to the outer op, passing through results.
+    regions.emplace_back(getResults());
+    return;
+  }
+  assert(*index == 1);
+  // Shape calculation branches to the body.
+  regions.emplace_back(&body());
+}
+
+//===----------------------------------------------------------------------===//
+// ShapeCalculateYieldShapesOp
+//===----------------------------------------------------------------------===//
+
+MutableOperandRange ShapeCalculateYieldShapesOp::getMutableSuccessorOperands(
+    Optional<unsigned> index) {
+  // The shape operands don't get forwarded to the body.
+  // MutableOperandRange always has an owning operation, even if empty, so
+  // create a 0-length range.
+  return MutableOperandRange(*this, /*start=*/0, /*length=*/0);
+}
+
+static LogicalResult verify(ShapeCalculateYieldShapesOp op) {
+  auto parent = op->getParentOfType<ShapeCalculateOp>();
+  if (parent.getNumResults() != op.getNumOperands())
+    return op.emitOpError(
+        "expected number of shapes to match number of results");
+  return success();
+}
+
 #define GET_OP_CLASSES
 #include "torch-mlir/Dialect/Torch/IR/TorchOps.cpp.inc"

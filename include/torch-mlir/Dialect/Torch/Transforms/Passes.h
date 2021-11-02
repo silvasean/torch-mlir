@@ -56,6 +56,14 @@ std::unique_ptr<OperationPass<ModuleOp>> createRefinePublicReturnPass();
 
 std::unique_ptr<OperationPass<FuncOp>> createDecomposeComplexOpsPass();
 
+std::unique_ptr<OperationPass<ModuleOp>> createPreprocessShapeLibraryPass();
+
+std::unique_ptr<OperationPass<ModuleOp>> createReifyShapeCalculationsPass();
+
+std::unique_ptr<OperationPass<FuncOp>> createSimplifyShapeCalculationsPass();
+
+StringRef getShapeLibrary();
+
 } // namespace Torch
 
 /// Registers all Torch transformation passes.

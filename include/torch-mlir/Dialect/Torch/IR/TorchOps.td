@@ -458,6 +458,12 @@ def Torch_PrimLoopOp : Torch_Op<"prim.Loop", [
     attr-dict `:` functional-type(operands, results)
   }];
   let verifier = [{ return RegionBranchOpInterface::verifyTypes(*this); }];
+  let extraClassDeclaration = [{
+    /// Returns true if this loop is "for-like". Otherwise it is "while-like"
+    /// and this function returns false.
+    /// See https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#loops
+    bool isForLike();
+  }];
 }
 
 def Torch_PrimLoopConditionOp : Torch_Op<"prim.Loop.condition", [
@@ -910,6 +916,68 @@ def Torch_OverwriteTensorOp : Torch_Op<"overwrite.tensor", [
     $value `overwrites` $overwritten attr-dict
       `:` type($value) `,` type($overwritten)
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// Shape modeling ops.
+//===----------------------------------------------------------------------===//
+
+// XXX: Find the right name.
+def Torch_ShapeCalculateOp : Torch_Op<"shape.calculate", [
+  DeclareOpInterfaceMethods<RegionBranchOpInterface>]> {
+  let summary = "TODO";
+  let description = [{
+  }];
+
+  let arguments = (ins);
+  let results = (outs Variadic<AnyTorchType>:$results);
+  let regions = (region
+    SizedRegion<1>:$body,
+    SizedRegion<1>:$shapeCalculation
+  );
+
+  let assemblyFormat = [{
+    $body `shapes` $shapeCalculation attr-dict `:` type($results)
+  }];
+  let verifier = [{ return RegionBranchOpInterface::verifyTypes(*this); }];
+}
+
+def Torch_ShapeCalculateYieldOp : Torch_Op<"shape.calculate.yield", [
+    Terminator,
+    ReturnLike,
+    HasParent<"::mlir::torch::Torch::ShapeCalculateOp">]> {
+  let summary = "yield-like terminator for torch.shape.calculate";
+  let description = [{
+  }];
+
+  let arguments = (ins
+    Variadic<AnyTorchType>:$results
+  );
+  let results = (outs);
+
+  let assemblyFormat = [{
+    attr-dict ($results^ `:` type($results))?
+  }];
+}
+
+def Torch_ShapeCalculateYieldShapesOp : Torch_Op<"shape.calculate.yield.shapes", [
+    DeclareOpInterfaceMethods<RegionBranchTerminatorOpInterface>,
+    Terminator,
+    HasParent<"::mlir::torch::Torch::ShapeCalculateOp">]> {
+  let summary = "yield-like terminator for torch.shape.calculate shape region";
+  let description = [{
+  }];
+
+  let arguments = (ins
+    Variadic<TorchIntListType>:$results
+  );
+  let results = (outs);
+
+  let assemblyFormat = [{
+    attr-dict ($results^ `:` type($results))?
+  }];
+
+  let verifier = "return ::verify(*this);";
 }
 
 #endif // TORCH_OPS
